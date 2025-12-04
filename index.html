@@ -1,0 +1,709 @@
+import React, { useState, useEffect, useRef } from ‘react’;
+
+import { Play, Pause, Plus, Trash2, Upload } from ‘lucide-react’;
+
+const CircularSequencer = () => {
+
+const [isPlaying, setIsPlaying] = useState(false);
+
+const [bpm, setBpm] = useState(120);
+
+const [lanes, setLanes] = useState([
+
+{ id: 1, steps: 8, speed: 1, sample: null, volume: 0.7, pitch: 1, active: true },
+
+{ id: 2, steps: 6, speed: 1.5, sample: null, volume: 0.7, pitch: 1, active: true },
+
+{ id: 3, steps: 12, speed: 0.75, sample: null, volume: 0.7, pitch: 1, active: true }
+
+]);
+
+const [masterVolume, setMasterVolume] = useState(0.8);
+
+const [reverb, setReverb] = useState(0.3);
+
+const [delay, setDelay] = useState(0.2);
+
+const audioContextRef = useRef(null);
+
+const animationRef = useRef(null);
+
+const lanePositionsRef = useRef({});
+
+const buffersRef = useRef({});
+
+const effectsRef = useRef({});
+
+// Initialize audio context
+
+useEffect(() => {
+
+audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+
+```
+
+// Create effects
+
+const ctx = audioContextRef.current;
+
+const masterGain = ctx.createGain();
+
+masterGain.gain.value = masterVolume;
+
+masterGain.connect(ctx.destination);
+
+const reverbNode = ctx.createConvolver();
+
+const reverbGain = ctx.createGain();
+
+reverbGain.gain.value = reverb;
+
+reverbGain.connect(masterGain);
+
+const delayNode = ctx.createDelay(2);
+
+delayNode.delayTime.value = 0.25;
+
+const delayFeedback = ctx.createGain();
+
+delayFeedback.gain.value = delay * 0.5;
+
+const delayGain = ctx.createGain();
+
+delayGain.gain.value = delay;
+
+delayNode.connect(delayFeedback);
+
+delayFeedback.connect(delayNode);
+
+delayNode.connect(delayGain);
+
+delayGain.connect(masterGain);
+
+effectsRef.current = { masterGain, reverbNode, reverbGain, delayNode, delayGain, delayFeedback };
+
+// Create impulse response for reverb
+
+createReverbImpulse(ctx, reverbNode);
+
+return () => {
+
+  if (audioContextRef.current) {
+
+    audioContextRef.current.close();
+
+  }
+
+};
+
+```
+
+}, []);
+
+// Update master volume
+
+useEffect(() => {
+
+if (effectsRef.current.masterGain) {
+
+effectsRef.current.masterGain.gain.value = masterVolume;
+
+}
+
+}, [masterVolume]);
+
+// Update reverb
+
+useEffect(() => {
+
+if (effectsRef.current.reverbGain) {
+
+effectsRef.current.reverbGain.gain.value = reverb;
+
+}
+
+}, [reverb]);
+
+// Update delay
+
+useEffect(() => {
+
+if (effectsRef.current.delayGain && effectsRef.current.delayFeedback) {
+
+effectsRef.current.delayGain.gain.value = delay;
+
+effectsRef.current.delayFeedback.gain.value = delay * 0.5;
+
+}
+
+}, [delay]);
+
+const createReverbImpulse = (ctx, convolver) => {
+
+const rate = ctx.sampleRate;
+
+const length = rate * 2;
+
+const impulse = ctx.createBuffer(2, length, rate);
+
+const left = impulse.getChannelData(0);
+
+const right = impulse.getChannelData(1);
+
+```
+
+for (let i = 0; i < length; i++) {
+
+  left[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2);
+
+  right[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2);
+
+}
+
+convolver.buffer = impulse;
+
+```
+
+};
+
+const loadSample = async (laneId, file) => {
+
+const ctx = audioContextRef.current;
+
+const arrayBuffer = await file.arrayBuffer();
+
+const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+```
+
+buffersRef.current[laneId] = audioBuffer;
+
+setLanes(lanes.map(lane => 
+lane.id === laneId ? { ...lane, sample: file.name } : lane
+
+));
+
+```
+
+};
+
+const playSample = (laneId, lane) => {
+
+const buffer = buffersRef.current[laneId];
+
+if (!buffer || !lane.active) return;
+
+```
+
+const ctx = audioContextRef.current;
+
+const source = ctx.createBufferSource();
+
+source.buffer = buffer;
+
+const gainNode = ctx.createGain();
+
+gainNode.gain.value = lane.volume;
+
+source.playbackRate.value = lane.pitch;
+
+source.connect(gainNode);
+
+gainNode.connect(effectsRef.current.masterGain);
+
+gainNode.connect(effectsRef.current.reverbGain);
+
+gainNode.connect(effectsRef.current.delayNode);
+
+source.start();
+
+```
+
+};
+
+// Animation loop
+
+useEffect(() => {
+
+if (!isPlaying) return;
+
+```
+
+const msPerBeat = (60 / bpm) * 1000;
+
+let lastTriggerTime = {};
+
+const animate = (timestamp) => {
+
+  lanes.forEach(lane => {
+
+    if (!lane.active) return;
+
+    const position = (timestamp * lane.speed * (bpm / 120)) % (lane.steps * 100);
+
+    const currentStep = Math.floor(position / 100);
+
+    if (!lastTriggerTime[lane.id]) {
+
+      lastTriggerTime[lane.id] = { step: -1, time: 0 };
+
+    }
+
+    if (currentStep !== lastTriggerTime[lane.id].step && 
+
+        timestamp - lastTriggerTime[lane.id].time > 50) {
+
+      playSample(lane.id, lane);
+
+      lastTriggerTime[lane.id] = { step: currentStep, time: timestamp };
+
+    }
+
+    lanePositionsRef.current[lane.id] = position;
+
+  });
+
+  animationRef.current = requestAnimationFrame(animate);
+
+};
+
+animationRef.current = requestAnimationFrame(animate);
+
+return () => {
+
+  if (animationRef.current) {
+
+    cancelAnimationFrame(animationRef.current);
+
+  }
+
+};
+
+```
+
+}, [isPlaying, bpm, lanes]);
+
+const addLane = () => {
+
+const newId = Math.max(…lanes.map(l => l.id), 0) + 1;
+
+setLanes([…lanes, {
+
+id: newId,
+
+steps: 8,
+
+speed: 1,
+
+sample: null,
+
+volume: 0.7,
+
+pitch: 1,
+
+active: true
+
+}]);
+
+};
+
+const removeLane = (id) => {
+
+setLanes(lanes.filter(l => l.id !== id));
+
+delete buffersRef.current[id];
+
+};
+
+const updateLane = (id, updates) => {
+
+setLanes(lanes.map(lane =>
+lane.id === id ? { …lane, …updates } : lane
+
+));
+
+};
+
+const CircularLane = ({ lane }) => {
+
+const [rotation, setRotation] = useState(0);
+
+const canvasRef = useRef(null);
+
+```
+
+useEffect(() => {
+
+  const canvas = canvasRef.current;
+
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+
+  const centerX = canvas.width / 2;
+
+  const centerY = canvas.height / 2;
+
+  const radius = 60;
+
+  const draw = () => {
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw circle
+
+    ctx.strokeStyle = lane.active ? '#60a5fa' : '#9ca3af';
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+
+    ctx.stroke();
+
+    // Draw steps
+
+    for (let i = 0; i < lane.steps; i++) {
+
+      const angle = (i / lane.steps) * Math.PI * 2 - Math.PI / 2;
+
+      const x = centerX + Math.cos(angle) * radius;
+
+      const y = centerY + Math.sin(angle) * radius;
+
+      ctx.fillStyle = lane.active ? '#60a5fa' : '#9ca3af';
+
+      ctx.beginPath();
+
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+
+      ctx.fill();
+
+    }
+
+    // Draw playhead
+
+    if (isPlaying && lane.active) {
+
+      const position = lanePositionsRef.current[lane.id] || 0;
+
+      const angle = (position / (lane.steps * 100)) * Math.PI * 2 - Math.PI / 2;
+
+      const x = centerX + Math.cos(angle) * radius;
+
+      const y = centerY + Math.sin(angle) * radius;
+
+      ctx.fillStyle = '#ef4444';
+
+      ctx.beginPath();
+
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+
+      ctx.fill();
+
+    }
+
+    requestAnimationFrame(draw);
+
+  };
+
+  draw();
+
+}, [lane, isPlaying]);
+
+return <canvas ref={canvasRef} width={160} height={160} />;
+
+```
+
+};
+
+return (
+<div className="min-h-screen bg-gray-900 text-white p-6">
+<div className="max-w-7xl mx-auto">
+<h1 className="text-3xl font-bold mb-6">Circular Sequencer</h1>
+
+```
+
+    {/* Master Controls */}
+<div className="bg-gray-800 rounded-lg p-6 mb-6">
+<div className="flex items-center gap-6 mb-4">
+<button
+
+          onClick={() => setIsPlaying(!isPlaying)}
+
+          className="bg-blue-500 hover:bg-blue-600 px-6 py-3 rounded-lg flex items-center gap-2"
+>
+
+          {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+
+          {isPlaying ? 'Pause' : 'Play'}
+</button>
+<div className="flex items-center gap-3">
+<label className="font-medium">BPM:</label>
+<input
+
+            type="number"
+
+            value={bpm}
+
+            onChange={(e) => setBpm(Number(e.target.value))}
+
+            className="bg-gray-700 px-3 py-2 rounded w-20"
+
+            min="40"
+
+            max="240"
+
+          />
+</div>
+<button
+
+          onClick={addLane}
+
+          className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg flex items-center gap-2"
+>
+<Plus size={20} /> Add Lane
+</button>
+</div>
+<div className="grid grid-cols-3 gap-6">
+<div>
+<label className="block mb-2">Master Volume</label>
+<input
+
+            type="range"
+
+            min="0"
+
+            max="1"
+
+            step="0.01"
+
+            value={masterVolume}
+
+            onChange={(e) => setMasterVolume(Number(e.target.value))}
+
+            className="w-full"
+
+          />
+</div>
+<div>
+<label className="block mb-2">Reverb</label>
+<input
+
+            type="range"
+
+            min="0"
+
+            max="1"
+
+            step="0.01"
+
+            value={reverb}
+
+            onChange={(e) => setReverb(Number(e.target.value))}
+
+            className="w-full"
+
+          />
+</div>
+<div>
+<label className="block mb-2">Delay</label>
+<input
+
+            type="range"
+
+            min="0"
+
+            max="1"
+
+            step="0.01"
+
+            value={delay}
+
+            onChange={(e) => setDelay(Number(e.target.value))}
+
+            className="w-full"
+
+          />
+</div>
+</div>
+</div>
+
+    {/* Lanes */}
+<div className="space-y-4">
+
+      {lanes.map(lane => (
+<div key={lane.id} className="bg-gray-800 rounded-lg p-6">
+<div className="flex gap-6">
+
+            {/* Circular Visualization */}
+<div className="flex-shrink-0">
+<CircularLane lane={lane} />
+</div>
+
+            {/* Controls */}
+<div className="flex-1 grid grid-cols-2 gap-4">
+<div>
+<label className="block mb-2 text-sm">Sample</label>
+<div className="flex gap-2">
+<input
+
+                    type="file"
+
+                    accept="audio/*"
+
+                    onChange={(e) => {
+
+                      if (e.target.files[0]) {
+
+                        loadSample(lane.id, e.target.files[0]);
+
+                      }
+
+                    }}
+
+                    className="hidden"
+
+                    id={`file-${lane.id}`}
+
+                  />
+<label
+
+                    htmlFor={`file-${lane.id}`}
+
+                    className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded cursor-pointer flex items-center gap-2 text-sm"
+>
+<Upload size={16} /> Load
+</label>
+<span className="px-3 py-2 text-sm text-gray-400">
+
+                    {lane.sample || 'No sample'}
+</span>
+</div>
+</div>
+<div>
+<label className="block mb-2 text-sm">Steps: {lane.steps}</label>
+<input
+
+                  type="range"
+
+                  min="2"
+
+                  max="16"
+
+                  value={lane.steps}
+
+                  onChange={(e) => updateLane(lane.id, { steps: Number(e.target.value) })}
+
+                  className="w-full"
+
+                />
+</div>
+<div>
+<label className="block mb-2 text-sm">Speed: {lane.speed.toFixed(2)}x</label>
+<input
+
+                  type="range"
+
+                  min="0.25"
+
+                  max="4"
+
+                  step="0.25"
+
+                  value={lane.speed}
+
+                  onChange={(e) => updateLane(lane.id, { speed: Number(e.target.value) })}
+
+                  className="w-full"
+
+                />
+</div>
+<div>
+<label className="block mb-2 text-sm">Volume</label>
+<input
+
+                  type="range"
+
+                  min="0"
+
+                  max="1"
+
+                  step="0.01"
+
+                  value={lane.volume}
+
+                  onChange={(e) => updateLane(lane.id, { volume: Number(e.target.value) })}
+
+                  className="w-full"
+
+                />
+</div>
+<div>
+<label className="block mb-2 text-sm">Pitch: {lane.pitch.toFixed(2)}x</label>
+<input
+
+                  type="range"
+
+                  min="0.5"
+
+                  max="2"
+
+                  step="0.01"
+
+                  value={lane.pitch}
+
+                  onChange={(e) => updateLane(lane.id, { pitch: Number(e.target.value) })}
+
+                  className="w-full"
+
+                />
+</div>
+<div className="flex items-center gap-4">
+<label className="flex items-center gap-2">
+<input
+
+                    type="checkbox"
+
+                    checked={lane.active}
+
+                    onChange={(e) => updateLane(lane.id, { active: e.target.checked })}
+
+                    className="w-4 h-4"
+
+                  />
+
+                  Active
+</label>
+<button
+
+                  onClick={() => removeLane(lane.id)}
+
+                  className="bg-red-500 hover:bg-red-600 px-3 py-2 rounded flex items-center gap-2 text-sm"
+>
+<Trash2 size={16} /> Remove
+</button>
+</div>
+</div>
+</div>
+</div>
+
+      ))}
+</div>
+<div className="mt-6 text-sm text-gray-400">
+<p>Load audio samples into each lane and press play. Each circular lane rotates at different speeds, creating polyrhythmic patterns.</p>
+</div>
+</div>
+</div>
+
+```
+
+);
+
+};
+
+export default CircularSequencer;
+Lane
+Lane
+ 
