@@ -140,6 +140,36 @@
 
     }
 
+    .btn-record {
+
+        background: #ef4444;
+
+        color: white;
+
+    }
+
+    .btn-record:hover {
+
+        background: #dc2626;
+
+    }
+
+    .btn-record.recording {
+
+        background: #dc2626;
+
+        animation: pulse 1.5s infinite;
+
+    }
+
+    @keyframes pulse {
+
+        0%, 100% { opacity: 1; }
+
+        50% { opacity: 0.7; }
+
+    }
+
     .input-group {
 
         display: flex;
@@ -381,6 +411,98 @@
         border-radius: 8px;
 
     }
+
+    .sample-library {
+
+        background: #1f2937;
+
+        border-radius: 8px;
+
+        padding: 24px;
+
+        margin-bottom: 24px;
+
+    }
+
+    .sample-grid {
+
+        display: grid;
+
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+
+        gap: 12px;
+
+        margin-top: 12px;
+
+    }
+
+    .sample-btn {
+
+        background: #374151;
+
+        border: 2px solid #4b5563;
+
+        color: white;
+
+        padding: 12px;
+
+        border-radius: 6px;
+
+        cursor: pointer;
+
+        font-size: 0.875rem;
+
+        transition: all 0.2s;
+
+    }
+
+    .sample-btn:hover {
+
+        background: #4b5563;
+
+        border-color: #60a5fa;
+
+    }
+
+    .sample-btn.selected {
+
+        background: #3b82f6;
+
+        border-color: #3b82f6;
+
+    }
+
+    .filter-controls {
+
+        display: grid;
+
+        grid-template-columns: 1fr 1fr;
+
+        gap: 12px;
+
+        margin-top: 8px;
+
+        padding-top: 8px;
+
+        border-top: 1px solid #374151;
+
+    }
+
+    select {
+
+        background: #374151;
+
+        border: none;
+
+        color: white;
+
+        padding: 6px 10px;
+
+        border-radius: 4px;
+
+        cursor: pointer;
+
+    }
 </style>
 
 ```
@@ -402,6 +524,9 @@
 <button id="addLaneBtn" class="btn btn-success">
 <span>+</span> Add Lane
 </button>
+<button id="recordBtn" class="btn btn-record">
+<span>⏺</span> Record
+</button>
 </div>
 <div class="slider-grid">
 <div class="slider-control">
@@ -417,6 +542,11 @@
 <input type="range" id="delay" min="0" max="1" step="0.01" value="0.2">
 </div>
 </div>
+</div>
+<div class="sample-library">
+<h2 style="margin-bottom: 12px; font-size: 1.25rem;">Sample Library</h2>
+<p style="font-size: 0.875rem; color: #9ca3af; margin-bottom: 12px;">Click a sample, then click "Use" on a lane to load it</p>
+<div class="sample-grid" id="sampleLibrary"></div>
 </div>
 <div id="lanes" class="lanes"></div>
 <div class="info">
@@ -442,6 +572,40 @@
     let buffers = {};
 
     let effects = {};
+
+    let isRecording = false;
+
+    let mediaRecorder = null;
+
+    let recordedChunks = [];
+
+    let selectedSample = null;
+
+    // Sample library - using Web Audio API to generate sounds
+
+    const sampleLibrary = {
+
+        'Kick': { type: 'kick' },
+
+        'Snare': { type: 'snare' },
+
+        'Hi-Hat': { type: 'hihat' },
+
+        'Clap': { type: 'clap' },
+
+        'Tom': { type: 'tom' },
+
+        'Rim': { type: 'rim' },
+
+        'Bass': { type: 'bass' },
+
+        'Synth': { type: 'synth' },
+
+        'Blip': { type: 'blip' },
+
+        'Noise': { type: 'noise' }
+
+    };
 
     // Initialize
 
@@ -501,6 +665,8 @@
 
         document.getElementById('addLaneBtn').addEventListener('click', addLane);
 
+        document.getElementById('recordBtn').addEventListener('click', toggleRecording);
+
         document.getElementById('masterVolume').addEventListener('input', (e) => {
 
             effects.masterGain.gain.value = parseFloat(e.target.value);
@@ -523,6 +689,10 @@
 
         });
 
+        // Render sample library
+
+        renderSampleLibrary();
+
         // Add initial lanes
 
         addLane();
@@ -530,6 +700,218 @@
         addLane();
 
         addLane();
+
+    }
+
+    function renderSampleLibrary() {
+
+        const container = document.getElementById('sampleLibrary');
+
+        Object.keys(sampleLibrary).forEach(name => {
+
+            const btn = document.createElement('button');
+
+            btn.className = 'sample-btn';
+
+            btn.textContent = name;
+
+            btn.onclick = () => selectSample(name, btn);
+
+            container.appendChild(btn);
+
+        });
+
+    }
+
+    function selectSample(name, btn) {
+
+        document.querySelectorAll('.sample-btn').forEach(b => b.classList.remove('selected'));
+
+        btn.classList.add('selected');
+
+        selectedSample = name;
+
+    }
+
+    async function generateSample(type) {
+
+        const sampleRate = audioContext.sampleRate;
+
+        const duration = type === 'bass' || type === 'synth' ? 0.5 : 0.2;
+
+        const buffer = audioContext.createBuffer(1, sampleRate * duration, sampleRate);
+
+        const data = buffer.getChannelData(0);
+
+        switch(type) {
+
+            case 'kick':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 15);
+
+                    const freq = 150 * Math.exp(-t * 30);
+
+                    data[i] = Math.sin(2 * Math.PI * freq * t) * env;
+
+                }
+
+                break;
+
+            case 'snare':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 20);
+
+                    const tone = Math.sin(2 * Math.PI * 200 * t) * 0.3;
+
+                    const noise = (Math.random() * 2 - 1) * 0.7;
+
+                    data[i] = (tone + noise) * env;
+
+                }
+
+                break;
+
+            case 'hihat':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 40);
+
+                    data[i] = (Math.random() * 2 - 1) * env;
+
+                }
+
+                break;
+
+            case 'clap':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    let env = 0;
+
+                    if (t < 0.01) env = 1;
+
+                    else if (t < 0.03) env = Math.exp(-(t-0.01) * 50);
+
+                    else if (t < 0.04) env = 0.7;
+
+                    else env = Math.exp(-(t-0.04) * 30) * 0.7;
+
+                    data[i] = (Math.random() * 2 - 1) * env;
+
+                }
+
+                break;
+
+            case 'tom':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 10);
+
+                    const freq = 120 * Math.exp(-t * 8);
+
+                    data[i] = Math.sin(2 * Math.PI * freq * t) * env;
+
+                }
+
+                break;
+
+            case 'rim':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 60);
+
+                    const freq = 800 + Math.sin(2 * Math.PI * 100 * t) * 200;
+
+                    data[i] = Math.sin(2 * Math.PI * freq * t) * env * 0.5;
+
+                }
+
+                break;
+
+            case 'bass':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 3);
+
+                    data[i] = Math.sin(2 * Math.PI * 110 * t) * env;
+
+                }
+
+                break;
+
+            case 'synth':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 4);
+
+                    const freq = 440;
+
+                    data[i] = (Math.sin(2 * Math.PI * freq * t) + 
+
+                              Math.sin(2 * Math.PI * freq * 2 * t) * 0.5) * env * 0.5;
+
+                }
+
+                break;
+
+            case 'blip':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 30);
+
+                    const freq = 800 * Math.exp(-t * 20);
+
+                    data[i] = Math.sin(2 * Math.PI * freq * t) * env;
+
+                }
+
+                break;
+
+            case 'noise':
+
+                for (let i = 0; i < data.length; i++) {
+
+                    const t = i / sampleRate;
+
+                    const env = Math.exp(-t * 15);
+
+                    data[i] = (Math.random() * 2 - 1) * env;
+
+                }
+
+                break;
+
+        }
+
+        return buffer;
 
     }
 
@@ -583,6 +965,70 @@
 
     }
 
+    async function toggleRecording() {
+
+        if (!isRecording) {
+
+            // Start recording
+
+            const stream = audioContext.createMediaStreamDestination();
+
+            effects.masterGain.connect(stream);
+
+            mediaRecorder = new MediaRecorder(stream.stream);
+
+            recordedChunks = [];
+
+            mediaRecorder.ondataavailable = (e) => {
+
+                if (e.data.size > 0) {
+
+                    recordedChunks.push(e.data);
+
+                }
+
+            };
+
+            mediaRecorder.onstop = () => {
+
+                const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+
+                a.href = url;
+
+                a.download = `sequencer-recording-${Date.now()}.webm`;
+
+                a.click();
+
+            };
+
+            mediaRecorder.start();
+
+            isRecording = true;
+
+            document.getElementById('recordBtn').classList.add('recording');
+
+            document.getElementById('recordBtn').innerHTML = '<span>⏹</span> Stop Recording';
+
+        } else {
+
+            // Stop recording
+
+            mediaRecorder.stop();
+
+            isRecording = false;
+
+            document.getElementById('recordBtn').classList.remove('recording');
+
+            document.getElementById('recordBtn').innerHTML = '<span>⏺</span> Record';
+
+        }
+
+    }
+
     function addLane() {
 
         const lane = {
@@ -599,7 +1045,11 @@
 
             pitch: 1,
 
-            active: true
+            active: true,
+
+            filterType: 'none',
+
+            filterFreq: 1000
 
         };
 
@@ -648,9 +1098,25 @@ laneDiv.id = `lane-${lane.id}`;
 <div class="control-item">
 <label>Sample</label>
 <div class="file-input-wrapper">
-<label for="file-${lane.id}" class="file-label">📁 Load</label>
+<button class="file-label" id="use-sample-${lane.id}">Use Selected</button>
+<label for="file-${lane.id}" class="file-label">📁 Load File</label>
 <input type="file" id="file-${lane.id}" accept="audio/*">
 <span class="file-name" id="filename-${lane.id}">No sample</span>
+</div>
+<div class="filter-controls">
+<div>
+<label style="font-size: 0.75rem;">Filter Type</label>
+<select id="filter-type-${lane.id}">
+<option value="none">None</option>
+<option value="lowpass">Low Pass</option>
+<option value="highpass">High Pass</option>
+<option value="bandpass">Band Pass</option>
+</select>
+</div>
+<div>
+<label style="font-size: 0.75rem;">Frequency: <span id="filter-freq-val-${lane.id}">1000</span>Hz</label>
+<input type="range" id="filter-freq-${lane.id}" min="100" max="8000" value="1000">
+</div>
 </div>
 </div>
 <div class="control-item">
@@ -681,7 +1147,25 @@ laneDiv.id = `lane-${lane.id}`;
 
         document.getElementById('lanes').appendChild(laneDiv);
 
-        // Add event listeners
+        // Use selected sample button
+
+        document.getElementById(`use-sample-${lane.id}`).addEventListener('click', async () => {
+
+            if (selectedSample) {
+
+                const sampleType = sampleLibrary[selectedSample].type;
+
+                const buffer = await generateSample(sampleType);
+
+                buffers[lane.id] = buffer;
+
+                document.getElementById(`filename-${lane.id}`).textContent = selectedSample;
+
+            }
+
+        });
+
+        // File input
 
         document.getElementById(`file-${lane.id}`).addEventListener('change', async (e) => {
 
@@ -692,6 +1176,24 @@ laneDiv.id = `lane-${lane.id}`;
                 document.getElementById(`filename-${lane.id}`).textContent = e.target.files[0].name;
 
             }
+
+        });
+
+        // Filter controls
+
+        document.getElementById(`filter-type-${lane.id}`).addEventListener('change', (e) => {
+
+            updateLane(lane.id, { filterType: e.target.value });
+
+        });
+
+        document.getElementById(`filter-freq-${lane.id}`).addEventListener('input', (e) => {
+
+            const val = parseInt(e.target.value);
+
+            updateLane(lane.id, { filterFreq: val });
+
+            document.getElementById(`filter-freq-val-${lane.id}`).textContent = val;
 
         });
 
@@ -775,7 +1277,25 @@ laneDiv.id = `lane-${lane.id}`;
 
         source.playbackRate.value = lane.pitch;
 
-        source.connect(gainNode);
+        // Apply filter if enabled
+
+        if (lane.filterType !== 'none') {
+
+            const filter = audioContext.createBiquadFilter();
+
+            filter.type = lane.filterType;
+
+            filter.frequency.value = lane.filterFreq;
+
+            source.connect(filter);
+
+            filter.connect(gainNode);
+
+        } else {
+
+            source.connect(gainNode);
+
+        }
 
         gainNode.connect(effects.masterGain);
 
