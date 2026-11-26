@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sample Keyboard</title>
+<style>
+  :root {
+    --bg: #111827;
+    --panel: #1f2937;
+    --panel-2: #273244;
+    --border: #374151;
+    --text: #f9fafb;
+    --muted: #9ca3af;
+    --accent: #38bdf8;
+    --accent-2: #0ea5e9;
+    --white-key: #f3f4f6;
+    --white-key-down: #bae6fd;
+    --black-key: #111827;
+    --black-key-down: #0284c7;
+    --pending: rgba(156, 163, 175, 0.35);
+    --root: #f59e0b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px 16px;
+    min-height: 100vh;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; font-size: 0.95rem; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .row + .row { margin-top: 12px; }
+  .btn {
+    background: var(--accent-2);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+  .btn:active { transform: translateY(1px); }
+  label.ctl { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.9rem; }
+  select, input[type=range] { accent-color: var(--accent); }
+  select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 0.9rem;
+  }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    background: var(--panel-2); color: var(--muted); border: none;
+    padding: 8px 12px; font-size: 0.85rem; cursor: pointer;
+  }
+  .seg button.on { background: var(--accent-2); color: white; }
+  #drop {
+    border: 2px dashed var(--border); border-radius: 10px; padding: 14px;
+    text-align: center; color: var(--muted); font-size: 0.9rem; margin-top: 12px;
+  }
+  #drop.over { border-color: var(--accent); color: var(--text); }
+  #wave { width: 100%; height: 80px; display: block; margin-top: 12px; background: var(--panel-2); border-radius: 6px; }
+  .info { color: var(--muted); font-size: 0.85rem; margin-top: 8px; min-height: 1.2em; }
+  .progress { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.1s; }
+
+  /* Keyboard */
+  .kb-wrap { overflow-x: auto; padding-bottom: 4px; }
+  #kb {
+    position: relative; display: flex; height: 180px; min-width: 100%;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .key { position: relative; cursor: pointer; }
+  .key.white {
+    flex: 1 1 0; min-width: 20px; background: var(--white-key);
+    border: 1px solid #9ca3af; border-radius: 0 0 6px 6px; margin-right: -1px;
+  }
+  .key.black {
+    position: absolute; top: 0; height: 60%; background: var(--black-key);
+    border-radius: 0 0 4px 4px; z-index: 2; border: 1px solid #000;
+  }
+  .key.white.down { background: var(--white-key-down); }
+  .key.black.down { background: var(--black-key-down); }
+  .key.pending::after {
+    content: ''; position: absolute; inset: 0; background: var(--pending); border-radius: inherit;
+  }
+  .key .lbl {
+    position: absolute; bottom: 6px; left: 0; right: 0; text-align: center;
+    font-size: 10px; color: #4b5563; pointer-events: none;
+  }
+  .key.black .lbl { color: #9ca3af; bottom: 4px; }
+  .key .hint {
+    position: absolute; bottom: 20px; left: 0; right: 0; text-align: center;
+    font-size: 10px; color: #9ca3af; pointer-events: none; text-transform: uppercase;
+  }
+  .key.root .lbl { color: var(--root); font-weight: 700; }
+  .help { color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+  .help b { color: var(--text); font-weight: 600; }
+  @media (max-width: 600px) {
+    .key .hint { display: none; }
+    #kb { height: 150px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Sample Keyboard</h1>
+  <p class="sub">Load a sample and play it across the keys. Pitch changes, length stays the same.</p>
+
+  <div class="panel">
+    <div class="row">
+      <button class="btn" id="loadBtn">Load sample</button>
+      <button class="btn secondary" id="demoBtn">Use demo sound</button>
+      <input type="file" id="file" accept="audio/*,.wav,.aif,.aiff,.flac" hidden>
+    </div>
+    <div id="drop">or drop a WAV / FLAC / AIFF file here</div>
+    <canvas id="wave"></canvas>
+    <div class="info" id="info">No sample loaded.</div>
+    <div class="progress"><div id="prog"></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <label class="ctl">Root note
+        <select id="root"></select>
+      </label>
+      <label class="ctl">Mode
+        <span class="seg" id="mode">
+          <button data-v="stretch" class="on">Stretch (keeps length)</button>
+          <button data-v="classic">Classic (speeds up)</button>
+        </span>
+      </label>
+    </div>
+    <div class="row">
+      <label class="ctl"><input type="checkbox" id="formant"> Preserve formants (good for vocals)</label>
+      <label class="ctl"><input type="checkbox" id="oneshot" checked> One-shot</label>
+      <label class="ctl">Volume <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8"></label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="kb-wrap"><div id="kb"></div></div>
+  </div>
+
+  <div class="panel help">
+    <b>Computer keys:</b> Z S X D C V G B H N J M play the lower octave, Q 2 W 3 E R 5 T 6 Y 7 U I the upper one.
+    The root note is in orange. <b>MIDI</b> keyboards work too in browsers that support Web MIDI.<br>
+    Grey keys are still rendering. Try switching to <b>Classic</b> mode to hear the difference.
+  </div>
+</div>
+
+<script src="SignalsmithStretch.js"></script>
+<script>
+(() => {
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const noteName = m => NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
+  const isBlack = m => [1, 3, 6, 8, 10].includes(m % 12);
+  const RANGE = 12; // keys shown: root-12 .. root+12
+  const LOWER_KEYS = ['z', 's', 'x', 'd', 'c', 'v', 'g', 'b', 'h', 'n', 'j', 'm', ','];
+  const UPPER_KEYS = ['q', '2', 'w', '3', 'e', 'r', '5', 't', '6', 'y', '7', 'u', 'i'];
+
+  const $ = id => document.getElementById(id);
+  const state = {
+    ctx: null,
+    master: null,
+    source: null,        // decoded AudioBuffer of the original sample
+    rootMidi: 60,
+    mode: 'stretch',
+    formant: false,
+    oneShot: true,
+    rendered: new Map(), // semitones -> AudioBuffer (current settings)
+    rendering: new Map(), // semitones -> Promise
+    generation: 0,       // bumps whenever the cache is invalidated
+    voices: new Map(),   // midi -> {src, gain}
+  };
+
+  // ---------- audio setup ----------
+  function ensureCtx() {
+    if (!state.ctx) {
+      state.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      state.master = state.ctx.createGain();
+      state.master.gain.value = parseFloat($('vol').value);
+      state.master.connect(state.ctx.destination);
+    }
+    if (state.ctx.state === 'suspended') state.ctx.resume();
+    return state.ctx;
+  }
+
+  // Render one transposed copy of the sample offline with Signalsmith Stretch.
+  // The output stays the same length as the input; only pitch changes.
+  async function renderShift(semitones, gen) {
+    const src = state.source;
+    const sr = src.sampleRate;
+    const channels = Math.min(src.numberOfChannels, 2);
+    const tail = 0.2; // room for the stretcher's smoothing window
+    const length = Math.ceil((src.duration + tail) * sr);
+    const off = new OfflineAudioContext(channels, length, sr);
+    const node = await SignalsmithStretch(off, {
+      numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [channels]
+    });
+    node.connect(off.destination);
+    const data = [];
+    for (let c = 0; c < channels; c++) data.push(src.getChannelData(c).slice());
+    await node.addBuffers(data);
+    node.schedule({
+      output: 0, active: true, input: 0, rate: 1,
+      semitones,
+      formantCompensation: state.formant,
+    });
+    const out = await off.startRendering();
+    if (gen !== state.generation) return null; // settings changed mid-render
+    return out;
+  }
+
+  function getShift(semitones) {
+    if (semitones === 0) return Promise.resolve(state.source);
+    if (state.rendered.has(semitones)) return Promise.resolve(state.rendered.get(semitones));
+    if (state.rendering.has(semitones)) return state.rendering.get(semitones);
+    const gen = state.generation;
+    const p = renderShift(semitones, gen).then(buf => {
+      if (buf && gen === state.generation) {
+        state.rendered.set(semitones, buf);
+        state.rendering.delete(semitones);
+        markReady(state.rootMidi + semitones);
+        updateProgress();
+      }
+      return buf;
+    }).catch(err => {
+      console.error(err);
+      state.rendering.delete(semitones);
+      $('info').textContent = 'Rendering failed: ' + err.message;
+      return null;
+    });
+    state.rendering.set(semitones, p);
+    return p;
+  }
+
+  // Throw away cached renders (new sample or new formant setting).
+  function invalidate() {
+    state.generation++;
+    state.rendered.clear();
+    state.rendering.clear();
+  }
+
+  // Pre-render the whole visible keyboard, nearest notes first.
+  async function renderAll() {
+    const gen = state.generation;
+    refreshPendingMarks();
+    updateProgress();
+    if (!state.source || state.mode !== 'stretch') return;
+    const order = [];
+    for (let d = 1; d <= RANGE; d++) order.push(d, -d);
+    for (const s of order) {
+      if (gen !== state.generation) return;
+      await getShift(s);
+    }
+  }
+
+  function updateProgress() {
+    const total = RANGE * 2;
+    const done = state.mode === 'stretch' ? state.rendered.size : total;
+    $('prog').style.width = state.source ? (done / total * 100) + '%' : '0';
+  }
+
+  // ---------- playback ----------
+  async function noteOn(midi, velocity = 1) {
+    if (!state.source) { $('info').textContent = 'Load a sample first.'; return; }
+    const ctx = ensureCtx();
+    const semis = midi - state.rootMidi;
+    let buf, rate = 1;
+    if (state.mode === 'classic') {
+      buf = state.source;
+      rate = Math.pow(2, semis / 12);
+    } else {
+      const gen = state.generation;
+      buf = await getShift(semis);
+      if (!buf || gen !== state.generation) return;
+    }
+    noteOff(midi, true);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const gain = ctx.createGain();
+    gain.gain.value = velocity;
+    src.connect(gain).connect(state.master);
+    src.start();
+    const voice = {src, gain};
+    state.voices.set(midi, voice);
+    src.onended = () => { if (state.voices.get(midi) === voice) state.voices.delete(midi); };
+  }
+
+  function noteOff(midi, force = false) {
+    if (state.oneShot && !force) return;
+    const v = state.voices.get(midi);
+    if (!v) return;
+    const t = state.ctx.currentTime;
+    v.gain.gain.cancelScheduledValues(t);
+    v.gain.gain.setValueAtTime(v.gain.gain.value, t);
+    v.gain.gain.linearRampToValueAtTime(0, t + 0.06);
+    v.src.stop(t + 0.07);
+    state.voices.delete(midi);
+  }
+
+  // ---------- keyboard UI ----------
+  const keyEls = new Map();
+  function buildKeyboard() {
+    const kb = $('kb');
+    kb.innerHTML = '';
+    keyEls.clear();
+    const lo = state.rootMidi - RANGE, hi = state.rootMidi + RANGE;
+    const whites = [];
+    for (let m = lo; m <= hi; m++) if (!isBlack(m)) whites.push(m);
+    const whiteW = 100 / whites.length;
+    let whiteIndex = 0;
+    for (let m = lo; m <= hi; m++) {
+      const el = document.createElement('div');
+      el.className = 'key ' + (isBlack(m) ? 'black' : 'white') + (m === state.rootMidi ? ' root' : '');
+      el.dataset.midi = m;
+      const idx = m - lo;
+      const hint = idx < 12 ? LOWER_KEYS[idx] : UPPER_KEYS[idx - 12];
+      el.innerHTML = (hint ? `<span class="hint">${hint}</span>` : '') +
+        `<span class="lbl">${m % 12 === 0 || m === state.rootMidi ? noteName(m) : ''}</span>`;
+      if (isBlack(m)) {
+        el.style.left = `${Math.max(0, whiteIndex - 0.3) * whiteW}%`;
+        el.style.width = `${whiteW * 0.6}%`;
+      } else {
+        whiteIndex++;
+      }
+      kb.appendChild(el);
+      keyEls.set(m, el);
+    }
+    refreshPendingMarks();
+  }
+
+  function refreshPendingMarks() {
+    for (const [m, el] of keyEls) {
+      const s = m - state.rootMidi;
+      const ready = !state.source || state.mode === 'classic' || s === 0 || state.rendered.has(s);
+      el.classList.toggle('pending', !ready);
+    }
+  }
+  function markReady(m) { const el = keyEls.get(m); if (el) el.classList.remove('pending'); }
+  function setDown(m, down) { const el = keyEls.get(m); if (el) el.classList.toggle('down', down); }
+
+  // Pointer input with glissando: sliding a finger across keys plays them.
+  const pointerNotes = new Map();
+  function keyAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const k = el && el.closest('.key');
+    return k ? parseInt(k.dataset.midi, 10) : null;
+  }
+  const kb = $('kb');
+  kb.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const m = keyAt(e.clientX, e.clientY);
+    if (m == null) return;
+    kb.setPointerCapture(e.pointerId);
+    pointerNotes.set(e.pointerId, m);
+    setDown(m, true); noteOn(m);
+  });
+  kb.addEventListener('pointermove', e => {
+    if (!pointerNotes.has(e.pointerId)) return;
+    const m = keyAt(e.clientX, e.clientY);
+    const prev = pointerNotes.get(e.pointerId);
+    if (m == null || m === prev) return;
+    setDown(prev, false); noteOff(prev);
+    pointerNotes.set(e.pointerId, m);
+    setDown(m, true); noteOn(m);
+  });
+  const endPointer = e => {
+    const m = pointerNotes.get(e.pointerId);
+    if (m == null) return;
+    pointerNotes.delete(e.pointerId);
+    setDown(m, false); noteOff(m);
+  };
+  kb.addEventListener('pointerup', endPointer);
+  kb.addEventListener('pointercancel', endPointer);
+
+  // Computer keyboard
+  const heldKeys = new Set();
+  function midiForKey(k) {
+    let i = LOWER_KEYS.indexOf(k);
+    if (i >= 0) return state.rootMidi - RANGE + i;
+    i = UPPER_KEYS.indexOf(k);
+    if (i >= 0) return state.rootMidi + i;
+    return null;
+  }
+  window.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+    const m = midiForKey(e.key.toLowerCase());
+    if (m == null || heldKeys.has(e.key.toLowerCase())) return;
+    heldKeys.add(e.key.toLowerCase());
+    setDown(m, true); noteOn(m);
+  });
+  window.addEventListener('keyup', e => {
+    const k = e.key.toLowerCase();
+    if (!heldKeys.has(k)) return;
+    heldKeys.delete(k);
+    const m = midiForKey(k);
+    if (m != null) { setDown(m, false); noteOff(m); }
+  });
+
+  // Web MIDI (where supported)
+  if (navigator.requestMIDIAccess) {
+    navigator.requestMIDIAccess().then(access => {
+      const hook = input => {
+        input.onmidimessage = ({data}) => {
+          const [status, note, vel] = data;
+          const cmd = status & 0xf0;
+          if (cmd === 0x90 && vel > 0) { setDown(note, true); noteOn(note, vel / 127); }
+          else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) { setDown(note, false); noteOff(note); }
+        };
+      };
+      access.inputs.forEach(hook);
+      access.onstatechange = e => { if (e.port.type === 'input' && e.port.state === 'connected') hook(e.port); };
+    }).catch(() => {});
+  }
+
+  // ---------- loading ----------
+  async function loadArrayBuffer(ab, name) {
+    const ctx = ensureCtx();
+    $('info').textContent = 'Decoding ' + name + '...';
+    try {
+      state.source = await ctx.decodeAudioData(ab);
+    } catch (err) {
+      $('info').textContent = "Couldn't decode that file. Try WAV, FLAC or AIFF.";
+      return;
+    }
+    sampleLoaded(name);
+  }
+
+  function sampleLoaded(name) {
+    const s = state.source;
+    $('info').textContent = `${name}: ${s.duration.toFixed(2)}s, ${s.numberOfChannels === 1 ? 'mono' : 'stereo'}, ${s.sampleRate} Hz`;
+    drawWave();
+    invalidate();
+    renderAll();
+  }
+
+  $('loadBtn').onclick = () => { ensureCtx(); $('file').click(); };
+  $('file').onchange = async e => {
+    const f = e.target.files[0];
+    if (f) loadArrayBuffer(await f.arrayBuffer(), f.name);
+    e.target.value = '';
+  };
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', async e => {
+    const f = e.dataTransfer.files[0];
+    if (f) loadArrayBuffer(await f.arrayBuffer(), f.name);
+  });
+
+  // A short synthesized loop: a pluck chord plus kick hits on the beat,
+  // so you can hear that the rhythm keeps its timing when transposed.
+  $('demoBtn').onclick = () => {
+    const ctx = ensureCtx();
+    const sr = ctx.sampleRate, dur = 2;
+    const buf = ctx.createBuffer(2, sr * dur, sr);
+    const L = buf.getChannelData(0), R = buf.getChannelData(1);
+    const chord = [261.63, 329.63, 392.0]; // C major
+    for (let i = 0; i < L.length; i++) {
+      const t = i / sr;
+      const beat = t % 0.5;
+      // kick: falling sine sweep each half second
+      const kick = Math.sin(2 * Math.PI * (45 * beat + 4.2 * (1 - Math.exp(-beat * 25)))) * Math.exp(-beat * 18) * 0.6;
+      // plucked chord retriggered every beat, slight stereo detune
+      let l = 0, r = 0;
+      const env = Math.exp(-beat * 6);
+      chord.forEach((f, n) => {
+        for (let h = 1; h <= 6; h++) {
+          const a = 1 / h;
+          l += Math.sin(2 * Math.PI * f * h * t + n) * a;
+          r += Math.sin(2 * Math.PI * f * 1.003 * h * t + n) * a;
+        }
+      });
+      L[i] = kick + l * env * 0.08;
+      R[i] = kick + r * env * 0.08;
+    }
+    state.source = buf;
+    $('root').value = 60;
+    if (state.rootMidi !== 60) { state.rootMidi = 60; buildKeyboard(); }
+    sampleLoaded('Demo loop (C major)');
+  };
+
+  function drawWave() {
+    const c = $('wave'), g = c.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    c.width = c.clientWidth * dpr; c.height = c.clientHeight * dpr;
+    g.clearRect(0, 0, c.width, c.height);
+    if (!state.source) return;
+    const d = state.source.getChannelData(0);
+    const step = Math.max(1, Math.floor(d.length / c.width));
+    g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent');
+    const mid = c.height / 2;
+    for (let x = 0; x < c.width; x++) {
+      let mn = 1, mx = -1;
+      for (let i = x * step; i < (x + 1) * step && i < d.length; i++) { if (d[i] < mn) mn = d[i]; if (d[i] > mx) mx = d[i]; }
+      g.fillRect(x, mid - mx * mid, 1, Math.max(1, (mx - mn) * mid));
+    }
+  }
+  window.addEventListener('resize', drawWave);
+
+  // ---------- controls ----------
+  const rootSel = $('root');
+  for (let m = 36; m <= 84; m++) {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = noteName(m);
+    if (m === 60) o.selected = true;
+    rootSel.appendChild(o);
+  }
+  rootSel.onchange = () => {
+    state.rootMidi = parseInt(rootSel.value, 10);
+    buildKeyboard(); // renders are keyed by distance from the root, so the cache still applies
+  };
+  $('mode').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...$('mode').children].forEach(x => x.classList.toggle('on', x === b));
+    state.mode = b.dataset.v;
+    renderAll();
+  });
+  $('formant').onchange = e => { state.formant = e.target.checked; invalidate(); renderAll(); };
+  $('oneshot').onchange = e => { state.oneShot = e.target.checked; };
+  $('vol').oninput = e => { if (state.master) state.master.gain.value = parseFloat(e.target.value); };
+
+  buildKeyboard();
+  drawWave();
+  window.sampleKeyboard = state; // handy for poking at it from the console
+})();
+</script>
+</body>
+</html>
