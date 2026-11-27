@@ -161,7 +161,7 @@
   </div>
 </div>
 
-<script src="SignalsmithStretch.js"></script>
+<script src="stretch-render.js"></script>
 <script>
 (() => {
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -200,30 +200,18 @@
     return state.ctx;
   }
 
-  // Render one transposed copy of the sample offline with Signalsmith Stretch.
-  // The output stays the same length as the input; only pitch changes.
+  // Render one transposed copy of the sample with Signalsmith Stretch
+  // (see stretch-render.js). The output keeps the input's length; only pitch changes.
   async function renderShift(semitones, gen) {
     const src = state.source;
-    const sr = src.sampleRate;
     const channels = Math.min(src.numberOfChannels, 2);
-    const tail = 0.2; // room for the stretcher's smoothing window
-    const length = Math.ceil((src.duration + tail) * sr);
-    const off = new OfflineAudioContext(channels, length, sr);
-    const node = await SignalsmithStretch(off, {
-      numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [channels]
-    });
-    node.connect(off.destination);
     const data = [];
-    for (let c = 0; c < channels; c++) data.push(src.getChannelData(c).slice());
-    await node.addBuffers(data);
-    node.schedule({
-      output: 0, active: true, input: 0, rate: 1,
-      semitones,
-      formantCompensation: state.formant,
-    });
-    const out = await off.startRendering();
+    for (let c = 0; c < channels; c++) data.push(src.getChannelData(c));
+    const out = await StretchRender.render(data, src.sampleRate, semitones, {formant: state.formant});
     if (gen !== state.generation) return null; // settings changed mid-render
-    return out;
+    const buf = ensureCtx().createBuffer(channels, out[0].length, src.sampleRate);
+    out.forEach((d, c) => buf.copyToChannel(d, c));
+    return buf;
   }
 
   function getShift(semitones) {
@@ -540,9 +528,21 @@
 
   // iOS only counts some events as a real user gesture (touchend, not touchstart),
   // so also wake the audio up on those.
-  ['touchend', 'click', 'keydown'].forEach(t => document.addEventListener(t, () => {
-    if (state.ctx && state.ctx.state !== 'running') state.ctx.resume();
-  }, true));
+  // Playing a tiny silent sound inside the gesture is what reliably unlocks audio on iPhone.
+  let unlocked = false;
+  const unlockAudio = () => {
+    const ctx = ensureCtx();
+    if (!unlocked) {
+      const b = ctx.createBufferSource();
+      b.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      b.connect(ctx.destination);
+      b.start();
+      unlocked = true;
+    }
+    if (ctx.state !== 'running') ctx.resume();
+  };
+  ['touchend', 'pointerup', 'click', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
+  StretchRender.preload().catch(err => { $('info').textContent = err.message; });
 
   buildKeyboard();
   drawWave();

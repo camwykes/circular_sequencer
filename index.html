@@ -1430,13 +1430,21 @@ laneDiv.id = `lane-${lane.id}`;
 
     // Wake it up on the first tap, click or key press.
 
+    // Playing a tiny silent sound inside the gesture is what reliably unlocks audio on iPhone.
+    let audioUnlocked = false;
     const unlockAudio = () => {
-
-        if (audioContext && audioContext.state !== 'running') audioContext.resume();
-
+        if (!audioContext) return;
+        if (!audioUnlocked) {
+            const b = audioContext.createBufferSource();
+            b.buffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+            b.connect(audioContext.destination);
+            b.start();
+            audioUnlocked = true;
+        }
+        if (audioContext.state !== 'running') audioContext.resume();
     };
 
-    ['touchend', 'click', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
+    ['touchend', 'pointerup', 'click', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
 </script>
 
 ```

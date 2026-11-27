@@ -7,17 +7,22 @@ sample keeps its original length and timing instead of speeding up or slowing do
 ## How it works
 
 When a sample loads, every key (12 semitones down to 12 up from the root) is rendered
-once in an `OfflineAudioContext` running the Signalsmith Stretch AudioWorklet. Playback
-then just plays those pre-rendered buffers, so notes are instant and polyphonic.
-Rendering 24 keys of a short sample takes about a second on a laptop.
+once and cached. Playback then just plays those pre-rendered buffers, so notes are
+instant and polyphonic. Rendering 24 keys of a short sample takes under a second on a laptop.
+
+The rendering lives in `stretch-render.js`. Signalsmith Stretch ships as an AudioWorklet,
+but running it inside an `OfflineAudioContext` gives silent notes in iOS Safari. So the
+page loads the library's own worklet processor and drives it directly in JavaScript,
+128 samples at a time. The output is identical to the worklet version, and it doesn't
+depend on `OfflineAudioContext` or `AudioWorklet` at all.
 
 "Classic" mode plays the original sample at a faster or slower rate, the way old
 samplers do, so you can hear the difference.
 
 ## Running it
 
-AudioWorklets need a secure context, so the page has to be served over `https://`
-or `http://localhost`. Opening `index.html` straight from disk won't work.
+The page loads `SignalsmithStretch.js` with `fetch`, so it has to be served from a web
+server. Opening `index.html` straight from disk won't work.
 
 ```
 cd keyboard
