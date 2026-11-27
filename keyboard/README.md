@@ -19,6 +19,23 @@ depend on `OfflineAudioContext` or `AudioWorklet` at all.
 "Classic" mode plays the original sample at a faster or slower rate, the way old
 samplers do, so you can hear the difference.
 
+## Exporting a multi-sampled keyboard
+
+**Export WAVs** renders every key in the chosen range (the two octaves on screen,
+four octaves, or all 88 piano keys) and downloads one zip containing:
+
+- one WAV per key, named like `MySample_060_C4.wav` (MIDI number, then note name),
+  with the root note written into a `smpl` chunk so samplers can map them automatically
+- an `.sfz` file that maps every WAV to its own key, for samplers that read SFZ
+
+Files are 24-bit by default (16-bit and 32-bit float are options). For 16/24-bit,
+if any key within two octaves of the root would clip, all files are turned down by
+the same amount so levels stay matched. Keys further out than that can distort at
+extreme shifts, so if one of those would clip it's turned down on its own instead of
+dragging the whole set down. Float files are never turned down, since they can't clip.
+
+The encoder and zip writer live in `export.js` and have no dependencies.
+
 ## Running it
 
 The page loads `SignalsmithStretch.js` with `fetch`, so it has to be served from a web

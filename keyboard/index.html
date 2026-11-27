@@ -154,6 +154,27 @@
     <div class="kb-wrap"><div id="kb"></div></div>
   </div>
 
+  <div class="panel">
+    <div class="row">
+      <label class="ctl">Export range
+        <select id="expRange">
+          <option value="shown">Keys shown (2 octaves)</option>
+          <option value="4oct">4 octaves around root</option>
+          <option value="88" selected>Full 88 keys (A0 to C8)</option>
+        </select>
+      </label>
+      <label class="ctl">Format
+        <select id="expBits">
+          <option value="24" selected>24-bit WAV</option>
+          <option value="16">16-bit WAV</option>
+          <option value="32">32-bit float WAV</option>
+        </select>
+      </label>
+      <button class="btn" id="exportBtn">Export WAVs</button>
+    </div>
+    <div class="info" id="expInfo">Saves one Stretch-rendered WAV per key in a zip, plus an .sfz mapping file.</div>
+  </div>
+
   <div class="panel help">
     <b>Computer keys:</b> Z S X D C V G B H N J M play the lower octave, Q 2 W 3 E R 5 T 6 Y 7 U I the upper one.
     The root note is in orange. <b>MIDI</b> keyboards work too in browsers that support Web MIDI.<br>
@@ -162,6 +183,7 @@
 </div>
 
 <script src="stretch-render.js"></script>
+<script src="export.js"></script>
 <script>
 (() => {
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -260,7 +282,11 @@
 
   function updateProgress() {
     const total = RANGE * 2;
-    const done = state.mode === 'stretch' ? state.rendered.size : total;
+    let done = total;
+    if (state.mode === 'stretch') {
+      done = 0;
+      for (const s of state.rendered.keys()) if (s !== 0 && Math.abs(s) <= RANGE) done++;
+    }
     $('prog').style.width = state.source ? (done / total * 100) + '%' : '0';
   }
 
@@ -434,6 +460,7 @@
 
   function sampleLoaded(name) {
     const s = state.source;
+    state.sampleName = name.replace(/\.[^.]+$/, '').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'sample';
     $('info').textContent = `${name}: ${s.duration.toFixed(2)}s, ${s.numberOfChannels === 1 ? 'mono' : 'stereo'}, ${s.sampleRate} Hz`;
     drawWave();
     invalidate();
@@ -503,6 +530,102 @@
     }
   }
   window.addEventListener('resize', drawWave);
+
+  // ---------- export ----------
+  let exportJob = null;
+
+  function exportRange() {
+    const v = $('expRange').value;
+    if (v === 'shown') return [state.rootMidi - RANGE, state.rootMidi + RANGE];
+    if (v === '4oct') return [state.rootMidi - 24, state.rootMidi + 24];
+    return [21, 108]; // A0..C8
+  }
+
+  async function exportKeyboard() {
+    if (exportJob) { exportJob.cancel = true; return; }
+    if (!state.source) { $('expInfo').textContent = 'Load a sample first.'; return; }
+    const KE = window.KeyboardExport;
+    const src = state.source;
+    const sr = src.sampleRate;
+    const channels = Math.min(src.numberOfChannels, 2);
+    const bitDepth = parseInt($('expBits').value, 10);
+    const [lo, hi] = exportRange();
+    const count = hi - lo + 1;
+
+    // Rough size check so nobody accidentally fills their phone
+    const estMB = count * (src.length + 0.2 * sr) * channels * (bitDepth / 8) / 1e6;
+    if (estMB > 400 && !confirm(`This export will be about ${Math.round(estMB)} MB. Continue?`)) return;
+
+    const job = exportJob = {cancel: false};
+    const btn = $('exportBtn');
+    btn.textContent = 'Cancel';
+    const srcData = [];
+    for (let c = 0; c < channels; c++) srcData.push(src.getChannelData(c));
+
+    try {
+      // Pass 1: render every key and note its peak
+      const notes = [];
+      for (let m = lo; m <= hi; m++) {
+        if (job.cancel) break;
+        const semis = m - state.rootMidi;
+        $('expInfo').textContent = `Rendering ${KE.noteName(m)} (${m - lo + 1} of ${count})...`;
+        $('prog').style.width = ((m - lo) / count * 100) + '%';
+        let data;
+        if (semis === 0) data = srcData;
+        else if (state.rendered.has(semis)) {
+          const b = state.rendered.get(semis);
+          data = [];
+          for (let c = 0; c < channels; c++) data.push(b.getChannelData(c));
+        } else {
+          data = await StretchRender.render(srcData, sr, semis, {formant: state.formant});
+        }
+        let peak = 0;
+        for (const d of data) for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; }
+        notes.push({midi: m, data, peak});
+      }
+      if (job.cancel) { $('expInfo').textContent = 'Export cancelled.'; return; }
+
+      // Pass 2: levels. Float files can't clip, so they're left alone. For 16/24-bit,
+      // one shared gain keeps every key within two octaves of the root matched and
+      // unclipped. Extreme shifts can distort and spike, so they don't get to drag the
+      // whole set down; any of those that would still clip are turned down on their own.
+      const CORE = 24;
+      let corePeak = 0;
+      for (const n of notes) if (Math.abs(n.midi - state.rootMidi) <= CORE) corePeak = Math.max(corePeak, n.peak);
+      const gain = bitDepth !== 32 && corePeak > 0.999 ? 0.999 / corePeak : 1;
+      let extraDown = 0;
+      for (const n of notes) {
+        n.gain = gain;
+        if (bitDepth !== 32 && n.peak * gain > 0.999) { n.gain = 0.999 / n.peak; extraDown++; }
+      }
+      $('expInfo').textContent = 'Packing zip...';
+      await new Promise(r => setTimeout(r, 0));
+      const folder = `${state.sampleName}_keyboard`;
+      const files = [];
+      const sfzEntries = [];
+      for (const n of notes) {
+        const fileName = `${state.sampleName}_${String(n.midi).padStart(3, '0')}_${KE.noteName(n.midi)}.wav`;
+        files.push({name: `${folder}/${fileName}`, data: KE.encodeWav(n.data, sr, {bitDepth, rootMidi: n.midi, gain: n.gain})});
+        sfzEntries.push({midi: n.midi, fileName});
+        n.data = null; // free memory as we go
+      }
+      files.push({name: `${folder}/${state.sampleName}.sfz`, data: KE.makeSfz(sfzEntries)});
+      const zip = KE.makeZip(files);
+      KE.download(zip, `${folder}.zip`);
+      let msg = `Saved ${folder}.zip: ${notes.length} samples, ${(zip.size / 1e6).toFixed(1)} MB.`;
+      if (gain < 1) msg += ` Turned down ${(-20 * Math.log10(gain)).toFixed(1)} dB so no key clips.`;
+      if (extraDown) msg += ` ${extraDown} extreme ${extraDown === 1 ? 'key was' : 'keys were'} turned down a bit more to avoid clipping.`;
+      $('expInfo').textContent = msg;
+    } catch (err) {
+      console.error(err);
+      $('expInfo').textContent = 'Export failed: ' + err.message;
+    } finally {
+      exportJob = null;
+      btn.textContent = 'Export WAVs';
+      updateProgress();
+    }
+  }
+  $('exportBtn').onclick = exportKeyboard;
 
   // ---------- controls ----------
   const rootSel = $('root');
