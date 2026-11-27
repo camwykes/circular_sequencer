@@ -611,6 +611,8 @@
 
     function init() {
 
+        // On iPhone, treat this as media playback so the ring/silent switch doesn't mute it
+        if (navigator.audioSession) navigator.audioSession.type = 'playback';
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
         // Create effects chain
@@ -1422,6 +1424,19 @@ laneDiv.id = `lane-${lane.id}`;
     // Start the app
 
     init();
+
+
+    // Browsers start audio switched off until the user interacts with the page.
+
+    // Wake it up on the first tap, click or key press.
+
+    const unlockAudio = () => {
+
+        if (audioContext && audioContext.state !== 'running') audioContext.resume();
+
+    };
+
+    ['touchend', 'click', 'keydown'].forEach(t => document.addEventListener(t, unlockAudio, true));
 </script>
 
 ```

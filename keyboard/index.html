@@ -189,6 +189,8 @@
   // ---------- audio setup ----------
   function ensureCtx() {
     if (!state.ctx) {
+      // On iPhone, treat this as media playback so the ring/silent switch doesn't mute it
+      if (navigator.audioSession) navigator.audioSession.type = 'playback';
       state.ctx = new (window.AudioContext || window.webkitAudioContext)();
       state.master = state.ctx.createGain();
       state.master.gain.value = parseFloat($('vol').value);
@@ -535,6 +537,12 @@
   $('formant').onchange = e => { state.formant = e.target.checked; invalidate(); renderAll(); };
   $('oneshot').onchange = e => { state.oneShot = e.target.checked; };
   $('vol').oninput = e => { if (state.master) state.master.gain.value = parseFloat(e.target.value); };
+
+  // iOS only counts some events as a real user gesture (touchend, not touchstart),
+  // so also wake the audio up on those.
+  ['touchend', 'click', 'keydown'].forEach(t => document.addEventListener(t, () => {
+    if (state.ctx && state.ctx.state !== 'running') state.ctx.resume();
+  }, true));
 
   buildKeyboard();
   drawWave();
