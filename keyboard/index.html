@@ -20,6 +20,10 @@
     --black-key-down: #0284c7;
     --pending: rgba(156, 163, 175, 0.35);
     --root: #f59e0b;
+    --rec-white: #bae6fd;
+    --rec-black: #3b82b6;
+    --out-white: #6b7280;
+    --out-black: #0b0f17;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -91,7 +95,11 @@
     position: absolute; top: 0; height: 60%; background: var(--black-key);
     border-radius: 0 0 4px 4px; z-index: 2; border: 1px solid #000;
   }
-  .key.white.down { background: var(--white-key-down); }
+  .key.white.rec { background: var(--rec-white); }
+  .key.black.rec { background: var(--rec-black); }
+  .key.white.out { background: var(--out-white); }
+  .key.black.out { background: var(--out-black); border-color: #374151; }
+  .key.white.down { background: var(--accent); }
   .key.black.down { background: var(--black-key-down); }
   .key.pending::after {
     content: ''; position: absolute; inset: 0; background: var(--pending); border-radius: inherit;
@@ -146,21 +154,24 @@
     <div class="row">
       <label class="ctl"><input type="checkbox" id="formant"> Preserve formants (good for vocals)</label>
       <label class="ctl"><input type="checkbox" id="oneshot" checked> One-shot</label>
+      <label class="ctl"><input type="checkbox" id="onlyRec" checked> Only play recommended keys</label>
       <label class="ctl">Volume <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8"></label>
     </div>
   </div>
 
   <div class="panel">
     <div class="kb-wrap"><div id="kb"></div></div>
+    <div class="info" id="rangeInfo"></div>
   </div>
 
   <div class="panel">
     <div class="row">
       <label class="ctl">Export range
         <select id="expRange">
+          <option value="rec" selected>Recommended range</option>
           <option value="shown">Keys shown (2 octaves)</option>
           <option value="4oct">4 octaves around root</option>
-          <option value="88" selected>Full 88 keys (A0 to C8)</option>
+          <option value="88">Full 88 keys (A0 to C8)</option>
         </select>
       </label>
       <label class="ctl">Format
@@ -178,12 +189,15 @@
   <div class="panel help">
     <b>Computer keys:</b> Z S X D C V G B H N J M play the lower octave, Q 2 W 3 E R 5 T 6 Y 7 U I the upper one.
     The root note is in orange. <b>MIDI</b> keyboards work too in browsers that support Web MIDI.<br>
-    Grey keys are still rendering. Try switching to <b>Classic</b> mode to hear the difference.
+    Grey keys are still rendering. <b>Light blue</b> keys are the recommended range for this sample:
+    after loading, the app measures how much each size of shift degrades this particular sound and
+    keeps the keys that stay close to the original quality. Try switching to <b>Classic</b> mode to hear the difference.
   </div>
 </div>
 
 <script src="stretch-render.js"></script>
 <script src="export.js"></script>
+<script src="quality.js"></script>
 <script>
 (() => {
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -206,6 +220,8 @@
     rendering: new Map(), // semitones -> Promise
     generation: 0,       // bumps whenever the cache is invalidated
     voices: new Map(),   // midi -> {src, gain}
+    quality: null,       // {low, high, ...} recommended range in semitones, once measured
+    onlyRec: true,
   };
 
   // ---------- audio setup ----------
@@ -293,6 +309,7 @@
   // ---------- playback ----------
   async function noteOn(midi, velocity = 1) {
     if (!state.source) { $('info').textContent = 'Load a sample first.'; return; }
+    if (isBlocked(midi)) return;
     const ctx = ensureCtx();
     const semis = midi - state.rootMidi;
     let buf, rate = 1;
@@ -329,6 +346,84 @@
     state.voices.delete(midi);
   }
 
+  // ---------- recommended range ----------
+  let analysisJob = null;
+
+  function isRecommended(midi) {
+    const q = state.quality;
+    if (!q) return true; // not measured yet: don't block anything
+    const s = midi - state.rootMidi;
+    return s >= q.low && s <= q.high;
+  }
+  function isBlocked(midi) {
+    return state.mode === 'stretch' && state.onlyRec && !isRecommended(midi);
+  }
+
+  const fmtSemis = s => (s > 0 ? '+' : s < 0 ? '\u2212' : '') + Math.abs(s);
+
+  function applyRangeMarks() {
+    const q = state.quality;
+    const show = !!q && state.mode === 'stretch';
+    for (const [m, el] of keyEls) {
+      const rec = show && isRecommended(m);
+      el.classList.toggle('rec', rec);
+      el.classList.toggle('out', show && !rec);
+    }
+    const opt = $('expRange').options[0];
+    if (q) {
+      const lo = state.rootMidi + q.low, hi = state.rootMidi + q.high;
+      const text = `${noteName(lo)} to ${noteName(hi)} (${fmtSemis(q.low)} to ${fmtSemis(q.high)} semitones)`;
+      opt.textContent = `Recommended range: ${noteName(lo)} to ${noteName(hi)}`;
+      $('rangeInfo').textContent = state.mode === 'stretch'
+        ? `Recommended range for this sample: ${text}.`
+        : `Recommended range for this sample in Stretch mode: ${text}.`;
+    } else {
+      opt.textContent = 'Recommended range';
+      if (!state.source) $('rangeInfo').textContent = '';
+    }
+  }
+
+  function runAnalysis() {
+    if (analysisJob) analysisJob.cancel = true;
+    state.quality = null;
+    applyRangeMarks();
+    if (!state.source) return Promise.resolve(null);
+    const job = {cancel: false};
+    analysisJob = job;
+    const src = state.source;
+    const data = [];
+    for (let c = 0; c < Math.min(src.numberOfChannels, 2); c++) data.push(src.getChannelData(c));
+    $('rangeInfo').textContent = 'Measuring which keys keep good quality...';
+    job.promise = SampleQuality.analyse(data, src.sampleRate, {
+      formant: state.formant,
+      isCancelled: () => job.cancel,
+      onProgress: n => { if (!job.cancel) $('rangeInfo').textContent = `Measuring which keys keep good quality... (${n} checks)`; },
+    }).then(q => {
+      if (job.cancel) return null;
+      analysisJob = null;
+      state.quality = q;
+      applyRangeMarks();
+      return q;
+    }).catch(err => {
+      if (!job.cancel) {
+        analysisJob = null;
+        console.error(err);
+        $('rangeInfo').textContent = "Couldn't measure the recommended range: " + err.message;
+      }
+      return null;
+    });
+    return job.promise;
+  }
+
+  // Render the keys on screen first (so they're playable quickly), then measure quality.
+  function renderThenAnalyse() {
+    const gen = state.generation;
+    if (analysisJob) analysisJob.cancel = true;
+    state.quality = null;
+    applyRangeMarks();
+    renderAll().then(() => { if (gen === state.generation) runAnalysis(); });
+  }
+
   // ---------- keyboard UI ----------
   const keyEls = new Map();
   function buildKeyboard() {
@@ -358,6 +453,7 @@
       keyEls.set(m, el);
     }
     refreshPendingMarks();
+    applyRangeMarks();
   }
 
   function refreshPendingMarks() {
@@ -368,7 +464,10 @@
     }
   }
   function markReady(m) { const el = keyEls.get(m); if (el) el.classList.remove('pending'); }
-  function setDown(m, down) { const el = keyEls.get(m); if (el) el.classList.toggle('down', down); }
+  function setDown(m, down) {
+    const el = keyEls.get(m);
+    if (el) el.classList.toggle('down', down && !isBlocked(m));
+  }
 
   // Pointer input with glissando: sliding a finger across keys plays them.
   const pointerNotes = new Map();
@@ -464,7 +563,7 @@
     $('info').textContent = `${name}: ${s.duration.toFixed(2)}s, ${s.numberOfChannels === 1 ? 'mono' : 'stereo'}, ${s.sampleRate} Hz`;
     drawWave();
     invalidate();
-    renderAll();
+    renderThenAnalyse();
   }
 
   $('loadBtn').onclick = () => { ensureCtx(); $('file').click(); };
@@ -534,8 +633,16 @@
   // ---------- export ----------
   let exportJob = null;
 
-  function exportRange() {
+  async function exportRange() {
     const v = $('expRange').value;
+    if (v === 'rec') {
+      if (!state.quality && analysisJob) {
+        $('expInfo').textContent = 'Waiting for the quality check to finish...';
+        await analysisJob.promise;
+      }
+      const q = state.quality || {low: -RANGE, high: RANGE};
+      return [state.rootMidi + q.low, state.rootMidi + q.high];
+    }
     if (v === 'shown') return [state.rootMidi - RANGE, state.rootMidi + RANGE];
     if (v === '4oct') return [state.rootMidi - 24, state.rootMidi + 24];
     return [21, 108]; // A0..C8
@@ -549,7 +656,7 @@
     const sr = src.sampleRate;
     const channels = Math.min(src.numberOfChannels, 2);
     const bitDepth = parseInt($('expBits').value, 10);
-    const [lo, hi] = exportRange();
+    const [lo, hi] = await exportRange();
     const count = hi - lo + 1;
 
     // Rough size check so nobody accidentally fills their phone
@@ -643,9 +750,11 @@
     const b = e.target.closest('button'); if (!b) return;
     [...$('mode').children].forEach(x => x.classList.toggle('on', x === b));
     state.mode = b.dataset.v;
+    applyRangeMarks();
     renderAll();
   });
-  $('formant').onchange = e => { state.formant = e.target.checked; invalidate(); renderAll(); };
+  $('formant').onchange = e => { state.formant = e.target.checked; invalidate(); renderThenAnalyse(); };
+  $('onlyRec').onchange = e => { state.onlyRec = e.target.checked; };
   $('oneshot').onchange = e => { state.oneShot = e.target.checked; };
   $('vol').oninput = e => { if (state.master) state.master.gain.value = parseFloat(e.target.value); };
 

@@ -19,10 +19,34 @@ depend on `OfflineAudioContext` or `AudioWorklet` at all.
 "Classic" mode plays the original sample at a faster or slower rate, the way old
 samplers do, so you can hear the difference.
 
+## Recommended range
+
+Every sound tolerates pitch shifting differently: a smooth pad can go a long way,
+drums and voices smear sooner. So after a sample loads (and the on-screen keys are
+rendered), the app measures it, in `quality.js`:
+
+1. Take the loudest ~1.2 s of the sample.
+2. For each shift, pitch it up (or down) by that many semitones, then back again.
+3. Compare the round trip with the original, using magnitude spectra so harmless
+   phase changes don't count. For upward shifts, only the part of the spectrum that
+   stayed below the Nyquist limit is compared, since losing content above hearing
+   isn't a real problem for the shifted note.
+4. A shift is recommended if it scores no more than 3 dB worse than a one-semitone
+   shift of the same sample. Measuring against the sample's own baseline keeps noisy
+   or reverby recordings from being judged unfairly. It searches up to ±24 semitones
+   and stops in each direction after two shifts in a row miss the bar.
+
+Recommended keys show in light blue, the rest in grey. With **Only play recommended
+keys** on (the default), grey keys stay silent. This applies to Stretch mode only.
+The export panel's default range is the recommended range.
+
+Measured examples: a pure tone gets the full ±24, a drum loop about −13 to +17,
+a snare-like sound about −8 to +16.
+
 ## Exporting a multi-sampled keyboard
 
-**Export WAVs** renders every key in the chosen range (the two octaves on screen,
-four octaves, or all 88 piano keys) and downloads one zip containing:
+**Export WAVs** renders every key in the chosen range (the recommended range, the two
+octaves on screen, four octaves, or all 88 piano keys) and downloads one zip containing:
 
 - one WAV per key, named like `MySample_060_C4.wav` (MIDI number, then note name),
   with the root note written into a `smpl` chunk so samplers can map them automatically
